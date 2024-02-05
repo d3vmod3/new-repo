@@ -1,0 +1,230 @@
+version: "3"
+
+networks:
+  laravel:
+
+services:
+  docker_laravel_app:
+    build:
+      context: .
+      dockerfile: nginx.dev.dockerfile
+    ports:
+      - 80:80
+    volumes:
+      - ./src:/var/www/html:delegated
+    restart: always
+    depends_on:
+      - php
+      - redis
+      - cron
+      - mysql
+      - mailhog
+    networks:
+      - laravel
+
+  mysql:
+    image: mysql:8
+    restart: unless-stopped
+    tty: true
+    ports:
+      - 3306:3306
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      SERVICE_TAGS: dev
+      SERVICE_NAME: mysql
+    networks:
+      - laravel
+
+  php:
+    build:
+      context: .
+      dockerfile: php.dockerfile
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+      replicas: 4
+    volumes:
+      - ./src:/var/www/html:delegated
+    networks:
+      - laravel
+
+  phpws:
+    build:
+      context: .
+      dockerfile: php.dockerfile
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+      replicas: 4
+    # ports:
+    #   - 6001:6001
+    volumes:
+      - ./src:/var/www/html:delegated
+    networks:
+      - laravel
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    ports:
+      - 6379:6379
+    networks:
+      - laravel
+
+  composer:
+    build:
+      context: .
+      dockerfile: composer.dockerfile
+    volumes:
+      - ./src:/var/www/html
+    working_dir: /var/www/html
+    depends_on:
+      - php
+    user: laravel
+    entrypoint: ["composer", "--ignore-platform-reqs"]
+    networks:
+      - laravel
+
+  npm:
+    image: node:20
+    volumes:
+      - ./src:/var/www/html
+    working_dir: /var/www/html
+    entrypoint: ["npm", "run", "dev"]
+    networks:
+      - laravel
+
+  artisan:
+    build:
+      context: .
+      dockerfile: php.dockerfile
+    volumes:
+      - ./src:/var/www/html:delegated
+    depends_on:
+      - mysql
+    working_dir: /var/www/html
+    user: laravel
+    entrypoint: ["php", "/var/www/html/artisan"]
+    networks:
+      - laravel
+
+  selenium:
+    image: selenium/standalone-chrome:latest
+    volumes:
+      - /dev/shm:/dev/shm
+    environment:
+      - CHROMEDRIVER_WHITELISTED_IPS=''
+      - SCREEN_WIDTH=1920
+      - SCREEN_HEIGHT=1080
+    ports:
+      - "4444:4444"
+      - "7900:7900"
+    networks:
+      - laravel
+
+  dusk:
+    build:
+      context: .
+      dockerfile: php.dockerfile
+    volumes:
+      - ./src:/var/www/html:delegated
+    depends_on:
+      - docker_laravel_app
+      - selenium
+    working_dir: /var/www/html
+    user: laravel
+    entrypoint: ["php", "/var/www/html/artisan", "dusk"]
+    networks:
+      - laravel
+
+  test:
+    build:
+      context: .
+      dockerfile: php.dockerfile
+    volumes:
+      - ./src:/var/www/html:delegated
+    working_dir: /var/www/html
+    user: laravel
+    command: sh -c "cd /var/www/html && ./vendor/bin/pint && php artisan test --log-junit=phpunit-junit.xml --coverage-text=phpunit.cov.txt --coverage-cobertura=cobertura-coverage.xml --coverage-clover=clover-coverage.xml"
+    # entrypoint: [ 'php', '/var/www/html/artisan', 'test' ]
+
+  pint:
+    build:
+      context: .
+      dockerfile: php.dockerfile
+    volumes:
+      - ./src:/var/www/html:delegated
+    working_dir: /var/www/html
+    user: laravel
+
+  phpstan:
+    build:
+      context: .
+      dockerfile: php.dockerfile
+    volumes:
+      - ./src:/var/www/html:delegated
+    working_dir: /var/www/html
+    user: laravel
+
+  cron:
+    build:
+      context: .
+      dockerfile: cron.dockerfile
+    volumes:
+      - ./src:/var/www/html
+    networks:
+      - laravel
+
+  mailhog:
+    image: jcalonso/mailhog:latest
+    ports:
+      - 1025:1025
+      - 8025:8025
+    networks:
+      - laravel
+
+  postgres:
+    image: postgres
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: password
+    networks:
+      - laravel
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:legacy
+    environment:
+      DB_VENDOR: POSTGRES
+      DB_ADDR: postgres
+      DB_DATABASE: keycloak
+      DB_USER: keycloak
+      DB_SCHEMA: public
+      DB_PASSWORD: password
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: Pa55w0rd
+      # Uncomment the line below if you want to specify JDBC parameters. The parameter below is just an example, and it shouldn't be used in production without knowledge. It is highly recommended that you read the PostgreSQL JDBC driver documentation in order to use it.
+      #JDBC_PARAMS: "ssl=true"
+      # ports:
+      #   - 8080:8080
+    depends_on:
+      - postgres
+    networks:
+      - laravel

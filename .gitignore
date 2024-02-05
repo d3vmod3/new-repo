@@ -1,0 +1,11 @@
+data
+.DS_Store
+.idea
+.env
+.vscode
+clover-coverage.xml
+cobertura-coverage.xml
+phpunit.cov.txt
+phpunit-junit.xml
+phpunit.dusk.xml
+phpunit.xml
